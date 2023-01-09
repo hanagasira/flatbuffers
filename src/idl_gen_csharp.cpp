@@ -221,6 +221,15 @@ class CSharpGenerator : public BaseGenerator {
         std::string(FlatBuffersGeneratedWarning()) +
         "\n"
         "// </auto-generated>\n\n";
+    switch (options.cs_nullable) {
+      case IDLOptions::CSharpNullable_Default: break;
+      case IDLOptions::CSharpNullable_Enabled:
+        code += "#nullable enable\n\n";
+        break;
+      case IDLOptions::CSharpNullable_Disabled:
+        code += "#nullable disable\n\n";
+        break;
+    }
 
     std::string namespace_name = FullNamespace(".", ns);
     if (!namespace_name.empty()) {
@@ -306,9 +315,9 @@ class CSharpGenerator : public BaseGenerator {
   // Cast statements for mutator method parameters.
   // In Java, parameters representing unsigned numbers need to be cast down to
   // their respective type. For example, a long holding an unsigned int value
-  // would be cast down to int before being put onto the buffer. In C#, one cast
-  // directly cast an Enum to its underlying type, which is essential before
-  // putting it onto the buffer.
+  // would be cast down to int before being put onto the buffer. In C#, one
+  // cast directly cast an Enum to its underlying type, which is essential
+  // before putting it onto the buffer.
   std::string SourceCast(const Type &type,
                          const bool isOptional = false) const {
     if (IsSeries(type)) {
@@ -523,8 +532,8 @@ class CSharpGenerator : public BaseGenerator {
       const auto array_cnt = array_field ? (array_count + 1) : array_count;
       if (IsStruct(type)) {
         // Generate arguments for a struct inside a struct. To ensure names
-        // don't clash, and to make it obvious these arguments are constructing
-        // a nested struct, prefix the name with the field name.
+        // don't clash, and to make it obvious these arguments are
+        // constructing a nested struct, prefix the name with the field name.
         GenStructArgs(*field_type.struct_def, code_ptr,
                       (nameprefix + (EscapeKeyword(field.name) + "_")).c_str(),
                       array_cnt);
@@ -824,7 +833,8 @@ class CSharpGenerator : public BaseGenerator {
     // public type name() { return bb.getType(i + offset); }
     // or for tables of the form:
     // public type name() {
-    //   int o = __offset(offset); return o != 0 ? bb.getType(o + i) : default;
+    //   int o = __offset(offset); return o != 0 ? bb.getType(o + i) :
+    //   default;
     // }
     GenComment(struct_def.doc_comment, code_ptr, &comment_config);
     if (struct_def.attributes.Lookup("private")) {
@@ -924,6 +934,13 @@ class CSharpGenerator : public BaseGenerator {
         conditional_cast = "(" + type_name_dest + optional + ")";
       }
       if (field.IsScalarOptional()) { optional = "?"; }
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        if (IsString(field.value.type)) { optional = "?"; }
+        if (IsVector(field.value.type) &&
+            field.value.type.element == BASE_TYPE_STRING) {
+          optional = "?";
+        }
+      }
       std::string dest_mask = "";
       std::string dest_cast = DestinationCast(field.value.type);
       std::string src_cast = SourceCast(field.value.type);
@@ -933,8 +950,8 @@ class CSharpGenerator : public BaseGenerator {
           "  public " + type_name_dest + optional + " " + field_name_camel;
       std::string obj = "(new " + type_name + "())";
 
-      // Most field accessors need to retrieve and test the field offset first,
-      // this is the prefix code for that:
+      // Most field accessors need to retrieve and test the field offset
+      // first, this is the prefix code for that:
       auto offset_prefix =
           IsArray(field.value.type)
               ? " { return "
@@ -958,11 +975,11 @@ class CSharpGenerator : public BaseGenerator {
            (IsVector(field.value.type) &&
             IsScalar(field.value.type.element)))) {
         // For scalars, default value will be returned by GetDefaultValue().
-        // If the scalar is an enum, GetDefaultValue() returns an actual c# enum
-        // that doesn't need to be casted. However, default values for enum
-        // elements of vectors are integer literals ("0") and are still casted
-        // for clarity.
-        // If the scalar is optional and enum, we still need the cast.
+        // If the scalar is an enum, GetDefaultValue() returns an actual c#
+        // enum that doesn't need to be casted. However, default values for
+        // enum elements of vectors are integer literals ("0") and are still
+        // casted for clarity. If the scalar is optional and enum, we still
+        // need the cast.
         if ((field.value.type.enum_def == nullptr ||
              IsVector(field.value.type)) ||
             (IsEnum(field.value.type) && field.IsScalarOptional())) {
@@ -1087,13 +1104,21 @@ class CSharpGenerator : public BaseGenerator {
               } else {
                 code += "  public ";
               }
-              code += union_field_type_name + " ";
+              code += union_field_type_name;
+              if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+                code += "?";
+              }
+              code += " ";
               code += field_name_camel + "As" + val->name + "() { return ";
               code += field_name_camel;
               if (IsString(val->union_type)) {
                 code += "AsString()";
               } else {
-                code += "<" + union_field_type_name + ">().Value";
+                if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+                  code += "<" + union_field_type_name + ">()";
+                } else {
+                  code += "<" + union_field_type_name + ">().Value";
+                }
               }
             }
             break;
@@ -1219,8 +1244,8 @@ class CSharpGenerator : public BaseGenerator {
                 ? "(byte)(" + EscapeKeyword(field.name) + " ? 1 : 0)"
                 : EscapeKeyword(field.name);
         auto mutator_prefix = "Mutate";
-        // A vector mutator also needs the index of the vector element it should
-        // mutate.
+        // A vector mutator also needs the index of the vector element it
+        // should mutate.
         auto mutator_params = (is_series ? "(int j, " : "(") +
                               GenTypeGet(underlying_type) + " " +
                               EscapeKeyword(field.name) + ") { ";
@@ -1279,9 +1304,9 @@ class CSharpGenerator : public BaseGenerator {
       code += GenOffsetConstruct(struct_def, "builder.Offset");
       code += ";\n  }\n";
     } else {
-      // Generate a method that creates a table in one go. This is only possible
-      // when the table has no struct fields, since those have to be created
-      // inline, and there's no way to do so in Java.
+      // Generate a method that creates a table in one go. This is only
+      // possible when the table has no struct fields, since those have to be
+      // created inline, and there's no way to do so in Java.
       bool has_no_struct_fields = true;
       int num_fields = 0;
       for (auto it = struct_def.fields.vec.begin();
@@ -1313,6 +1338,9 @@ class CSharpGenerator : public BaseGenerator {
             code += WrapInNameSpace(
                 field.value.type.struct_def->defined_namespace,
                 GenTypeName_ObjectAPI(field.value.type.struct_def->name, opts));
+            if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+              code += "?";
+            }
             code += " ";
             code += EscapeKeyword(field.name);
             code += " = null";
@@ -1418,9 +1446,9 @@ class CSharpGenerator : public BaseGenerator {
             code += GenMethod(vector_type);
             code += "(";
             // At the moment there is no support of the type Vector with
-            // optional enum, e.g. if we have enum type SomeEnum there is no way
-            // to define `SomeEmum?[] enums` in FlatBuffer schema, so isOptional
-            // = false
+            // optional enum, e.g. if we have enum type SomeEnum there is no
+            // way to define `SomeEmum?[] enums` in FlatBuffer schema, so
+            // isOptional = false
             code += SourceCastBasic(vector_type, false);
             code += "data[i]";
             if (vector_type.base_type == BASE_TYPE_STRUCT ||
@@ -1429,8 +1457,8 @@ class CSharpGenerator : public BaseGenerator {
             code += "); return ";
             code += "builder.EndVector(); }\n";
 
-            // add Create...VectorBlock() overloads for T[], ArraySegment<T> and
-            // IntPtr
+            // add Create...VectorBlock() overloads for T[], ArraySegment<T>
+            // and IntPtr
             code += "  public static VectorOffset ";
             code += "Create";
             code += Name(field);
@@ -1564,64 +1592,6 @@ class CSharpGenerator : public BaseGenerator {
     }
   }
 
-  void GenVectorAccessObject(StructDef &struct_def,
-                             std::string *code_ptr) const {
-    auto &code = *code_ptr;
-    // Generate a vector of structs accessor class.
-    code += "\n";
-    code += "  ";
-    if (!struct_def.attributes.Lookup("private")) code += "public ";
-    code += "static struct Vector : BaseVector\n{\n";
-
-    // Generate the __assign method that sets the field in a pre-existing
-    // accessor object. This is to allow object reuse.
-    std::string method_indent = "    ";
-    code += method_indent + "public Vector ";
-    code += "__assign(int _vector, int _element_size, ByteBuffer _bb) { ";
-    code += "__reset(_vector, _element_size, _bb); return this; }\n\n";
-
-    auto type_name = struct_def.name;
-    auto method_start = method_indent + "public " + type_name + " Get";
-    // Generate the accessors that don't do object reuse.
-    code += method_start + "(int j) { return Get";
-    code += "(new " + type_name + "(), j); }\n";
-    code += method_start + "(" + type_name + " obj, int j) { ";
-    code += " return obj.__assign(";
-    code += struct_def.fixed ? "__p.__element(j)"
-                             : "__p.__indirect(__p.__element(j), bb)";
-    code += ", __p.bb); }\n";
-    // See if we should generate a by-key accessor.
-    if (!struct_def.fixed) {
-      auto &fields = struct_def.fields.vec;
-      for (auto kit = fields.begin(); kit != fields.end(); ++kit) {
-        auto &key_field = **kit;
-        if (key_field.key) {
-          auto nullable_annotation =
-              parser_.opts.gen_nullable ? "@Nullable " : "";
-          code += method_indent + nullable_annotation;
-          code += "public " + type_name + "? ";
-          code += "GetByKey(";
-          code += GenTypeGet(key_field.value.type) + " key) { ";
-          code += " return __lookup_by_key(null, ";
-          code += "__p.__vector(), key, ";
-          code += "__p.bb); ";
-          code += "}\n";
-          code += method_indent + nullable_annotation;
-          code += "public " + type_name + "?" + " ";
-          code += "GetByKey(";
-          code += type_name + "? obj, ";
-          code += GenTypeGet(key_field.value.type) + " key) { ";
-          code += " return __lookup_by_key(obj, ";
-          code += "__p.__vector(), key, ";
-          code += "__p.bb); ";
-          code += "}\n";
-          break;
-        }
-      }
-    }
-    code += "  }\n";
-  }
-
   std::string GenUnionVerify(const Type &union_type) const {
     if (union_type.enum_def) {
       const auto &enum_def = *union_type.enum_def;
@@ -1700,7 +1670,11 @@ class CSharpGenerator : public BaseGenerator {
     // Type
     code += "  public " + enum_def.name + " Type { get; set; }\n";
     // Value
-    code += "  public object " + class_member + " { get; set; }\n";
+    code += "  public object";
+    if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) { code += "?"; }
+    code += " ";
+    code += class_member + " { get; set; }\n";
+
     code += "\n";
     // Constructor
     code += "  public " + union_name + "() {\n";
@@ -1709,8 +1683,10 @@ class CSharpGenerator : public BaseGenerator {
     code += "    this." + class_member + " = null;\n";
     code += "  }\n\n";
     // As<T>
-    code += "  public T As<T>() where T : class { return this." + class_member +
-            " as T; }\n";
+    code += "  public T";
+    if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) { code += "?"; }
+    code +=
+        " As<T>() where T : class { return this." + class_member + " as T; }\n";
     // As, From
     for (auto it = enum_def.Vals().begin(); it != enum_def.Vals().end(); ++it) {
       auto &ev = **it;
@@ -1722,8 +1698,11 @@ class CSharpGenerator : public BaseGenerator {
               ? "internal"
               : "public";
       // As
-      code += "  " + accessibility + " " + type_name + " As" + ev.name +
-              "() { return this.As<" + type_name + ">(); }\n";
+      code += "  " + accessibility + " " + type_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += " As" + ev.name + "() { return this.As<" + type_name + ">(); }\n";
       // From
       auto lower_ev_name = ev.name;
       std::transform(lower_ev_name.begin(), lower_ev_name.end(),
@@ -1771,14 +1750,28 @@ class CSharpGenerator : public BaseGenerator {
       code += "  public override bool CanConvert(System.Type objectType) {\n";
       code += "    return objectType == typeof(" + union_name +
               ") || objectType == typeof(System.Collections.Generic.List<" +
-              union_name + ">);\n";
+              union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += ">);\n";
       code += "  }\n";
       code +=
-          "  public override void WriteJson(Newtonsoft.Json.JsonWriter writer, "
-          "object value, "
+          "  public override void WriteJson(Newtonsoft.Json.JsonWriter "
+          "writer, "
+          "object";
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code +=
+          " value, "
           "Newtonsoft.Json.JsonSerializer serializer) {\n";
       code += "    var _olist = value as System.Collections.Generic.List<" +
-              union_name + ">;\n";
+              union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += ">;\n";
       code += "    if (_olist != null) {\n";
       code += "      writer.WriteStartArray();\n";
       code +=
@@ -1791,21 +1784,39 @@ class CSharpGenerator : public BaseGenerator {
       code += "    }\n";
       code += "  }\n";
       code += "  public void WriteJson(Newtonsoft.Json.JsonWriter writer, " +
-              union_name +
-              " _o, "
-              "Newtonsoft.Json.JsonSerializer serializer) {\n";
+              union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code +=
+          " _o, "
+          "Newtonsoft.Json.JsonSerializer serializer) {\n";
       code += "    if (_o == null) return;\n";
       code += "    serializer.Serialize(writer, _o." + class_member + ");\n";
       code += "  }\n";
+      code += "  public override object";
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
       code +=
-          "  public override object ReadJson(Newtonsoft.Json.JsonReader "
+          " ReadJson(Newtonsoft.Json.JsonReader "
           "reader, "
           "System.Type objectType, "
-          "object existingValue, Newtonsoft.Json.JsonSerializer serializer) "
+          "object";
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code +=
+          " existingValue, Newtonsoft.Json.JsonSerializer serializer) "
           "{\n";
       code +=
-          "    var _olist = existingValue as System.Collections.Generic.List<" +
-          union_name + ">;\n";
+          "    var _olist = existingValue as "
+          "System.Collections.Generic.List<" +
+          union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += ">;\n";
       code += "    if (_olist != null) {\n";
       code += "      for (var _j = 0; _j < _olist.Count; ++_j) {\n";
       code += "        reader.Read();\n";
@@ -1820,9 +1831,15 @@ class CSharpGenerator : public BaseGenerator {
               union_name + ", serializer);\n";
       code += "    }\n";
       code += "  }\n";
-      code += "  public " + union_name +
-              " ReadJson(Newtonsoft.Json.JsonReader reader, " + union_name +
-              " _o, Newtonsoft.Json.JsonSerializer serializer) {\n";
+      code += "  public " + union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += " ReadJson(Newtonsoft.Json.JsonReader reader, " + union_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += " _o, Newtonsoft.Json.JsonSerializer serializer) {\n";
       code += "    if (_o == null) return null;\n";
       code += "    switch (_o.Type) {\n";
       for (auto it = enum_def.Vals().begin(); it != enum_def.Vals().end();
@@ -1852,7 +1869,7 @@ class CSharpGenerator : public BaseGenerator {
   void GenUnionUnPack_ObjectAPI(const EnumDef &enum_def, std::string *code_ptr,
                                 const std::string &camel_name,
                                 const std::string &camel_name_short,
-                                bool is_vector) const {
+                                bool is_vector, const IDLOptions &opts) const {
     auto &code = *code_ptr;
     std::string varialbe_name = "_o." + camel_name;
     std::string class_member = "Value";
@@ -1889,10 +1906,15 @@ class CSharpGenerator : public BaseGenerator {
         if (IsString(ev.union_type)) {
           code += "AsString" + func_suffix + ";\n";
         } else {
-          code += "<" + GenTypeGet(ev.union_type) + ">" + func_suffix;
-          code += ".HasValue ? this." + camel_name;
-          code += "<" + GenTypeGet(ev.union_type) + ">" + func_suffix +
-                  ".Value.UnPack() : null;\n";
+          if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+            code += "<" + GenTypeGet(ev.union_type) + ">" + func_suffix;
+            code += "?.UnPack();\n";
+          } else {
+            code += "<" + GenTypeGet(ev.union_type) + ">" + func_suffix;
+            code += ".HasValue ? this." + camel_name;
+            code += "<" + GenTypeGet(ev.union_type) + ">" + func_suffix +
+                    ".Value.UnPack() : null;\n";
+          }
         }
         code += indent + "    break;\n";
       }
@@ -1931,8 +1953,12 @@ class CSharpGenerator : public BaseGenerator {
           if (fixed) {
             code += start + "this." + camel_name + ".UnPack();\n";
           } else {
-            code += start + "this." + camel_name + ".HasValue ? this." +
-                    camel_name + ".Value.UnPack() : null;\n";
+            if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+              code += start + "this." + camel_name + "?.UnPack();\n";
+            } else {
+              code += start + "this." + camel_name + ".HasValue ? this." +
+                      camel_name + ".Value.UnPack() : null;\n";
+            }
           }
           break;
         }
@@ -1957,7 +1983,7 @@ class CSharpGenerator : public BaseGenerator {
             code += "    for (var _j = 0; _j < this." + camel_name +
                     "Length; ++_j) {\n";
             GenUnionUnPack_ObjectAPI(*field.value.type.enum_def, code_ptr,
-                                     camel_name, camel_name_short, true);
+                                     camel_name, camel_name_short, true, opts);
             code += "    }\n";
           } else if (field.value.type.element != BASE_TYPE_UTYPE) {
             auto fixed = field.value.type.struct_def == nullptr;
@@ -1969,8 +1995,12 @@ class CSharpGenerator : public BaseGenerator {
             if (fixed) {
               code += "this." + camel_name + "(_j)";
             } else {
-              code += "this." + camel_name + "(_j).HasValue ? this." +
-                      camel_name + "(_j).Value.UnPack() : null";
+              if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+                code += "this." + camel_name + "(_j)?.UnPack()";
+              } else {
+                code += "this." + camel_name + "(_j).HasValue ? this." +
+                        camel_name + "(_j).Value.UnPack() : null";
+              }
             }
             code += ");}\n";
           }
@@ -1978,7 +2008,7 @@ class CSharpGenerator : public BaseGenerator {
         case BASE_TYPE_UTYPE: break;
         case BASE_TYPE_UNION: {
           GenUnionUnPack_ObjectAPI(*field.value.type.enum_def, code_ptr,
-                                   camel_name, camel_name_short, false);
+                                   camel_name, camel_name_short, false, opts);
           break;
         }
         default: {
@@ -1990,7 +2020,9 @@ class CSharpGenerator : public BaseGenerator {
     code += "  }\n";
     // Pack()
     code += "  public static " + GenOffsetType(struct_def) +
-            " Pack(FlatBufferBuilder builder, " + struct_name + " _o) {\n";
+            " Pack(FlatBufferBuilder builder, " + struct_name;
+    if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) { code += "?"; }
+    code += " _o) {\n";
     code += "    if (_o == null) return default(" + GenOffsetType(struct_def) +
             ");\n";
     for (auto it = struct_def.fields.vec.begin();
@@ -2294,9 +2326,11 @@ class CSharpGenerator : public BaseGenerator {
         } else {
           code += "_o";
           for (size_t i = 0; i < array_lengths.size(); ++i) {
-            code += "." + ConvertCase(array_lengths[i].name, Case::kUpperCamel);
+            code +=
+                "?." + ConvertCase(array_lengths[i].name, Case::kUpperCamel);
           }
-          code += ";";
+          // code += " ?? default(float);";
+          code += " ?? default(" + GenTypeBasic(field_type) + ");";
         }
         code += "\n";
       }
@@ -2355,7 +2389,11 @@ class CSharpGenerator : public BaseGenerator {
         break;
       }
       case BASE_TYPE_VECTOR: {
-        type_name = "List<" + type_name + ">";
+        type_name = "List<" + type_name;
+        if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+          type_name += "?";
+        }
+        type_name += ">";
         break;
       }
       default: break;
@@ -2443,7 +2481,16 @@ class CSharpGenerator : public BaseGenerator {
           code += "  [Newtonsoft.Json.JsonIgnore()]\n";
         }
       }
-      code += "  public " + type_name + " " + camel_name + " { get; set; }\n";
+      // code += "  public " + type_name + " " + camel_name + " { get; set;
+      // }\n";
+      code += "  public " + type_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        if (!IsScalar(field.value.type.base_type) ||
+            IsString(field.value.type)) {
+          code += "?";
+        }
+      }
+      code += " " + camel_name + " { get; set; }\n";
     }
     // Generate Constructor
     code += "\n";
@@ -2487,8 +2534,11 @@ class CSharpGenerator : public BaseGenerator {
     if (opts.cs_gen_json_serializer &&
         parser_.root_struct_def_ == &struct_def) {
       code += "\n";
-      code += "  public static " + class_name +
-              " DeserializeFromJson(string jsonText) {\n";
+      code += "  public static " + class_name;
+      if (opts.cs_nullable == IDLOptions::CSharpNullable_Enabled) {
+        code += "?";
+      }
+      code += " DeserializeFromJson(string jsonText) {\n";
       code += "    return Newtonsoft.Json.JsonConvert.DeserializeObject<" +
               class_name + ">(jsonText);\n";
       code += "  }\n";
