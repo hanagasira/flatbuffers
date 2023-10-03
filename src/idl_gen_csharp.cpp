@@ -2385,6 +2385,9 @@ class CSharpGenerator : public BaseGenerator {
       if (field.deprecated) continue;
       if (field.value.type.base_type == BASE_TYPE_UTYPE) continue;
       if (field.value.type.element == BASE_TYPE_UTYPE) continue;
+      if (auto csharp_attribute = field.attributes.Lookup("csharp_attribute")) {
+        code += "  " + csharp_attribute->constant + "\n";
+      }
       auto type_name = GenTypeGet_ObjectAPI(field.value.type, opts);
       if (field.IsScalarOptional()) type_name += "?";
       auto camel_name = Name(field);
@@ -2392,8 +2395,14 @@ class CSharpGenerator : public BaseGenerator {
       if (opts.cs_gen_json_serializer) {
         if (IsUnion(field.value.type)) {
           auto utype_name = NamespacedName(*field.value.type.enum_def);
-          code +=
-              "  [Newtonsoft.Json.JsonProperty(\"" + field.name + "_type\")]\n";
+          if (field.IsRequired()) {
+            code += "  [Newtonsoft.Json.JsonProperty(\"" + field.name +
+                    "_type\", Required = Newtonsoft.Json.Required.Always)]\n";
+          } else {
+            code += "  [Newtonsoft.Json.JsonProperty(\"" + field.name +
+                    "_type\")]\n";
+          }
+
           if (IsVector(field.value.type)) {
             code += "  private " + utype_name + "[] " + camel_name + "Type {\n";
             code += "    get {\n";
@@ -2430,7 +2439,12 @@ class CSharpGenerator : public BaseGenerator {
             code += "  }\n";
           }
         }
-        code += "  [Newtonsoft.Json.JsonProperty(\"" + field.name + "\")]\n";
+        if (field.IsRequired()) {
+          code += "  [Newtonsoft.Json.JsonProperty(\"" + field.name +
+                  "\", Required = Newtonsoft.Json.Required.Always)]\n";
+        } else {
+          code += "  [Newtonsoft.Json.JsonProperty(\"" + field.name + "\")]\n";
+        }
         if (IsUnion(field.value.type)) {
           auto union_name =
               (IsVector(field.value.type))
